@@ -38,6 +38,18 @@ def debug(*args, **kwargs):
     if not DEBUG: return
     print(*args, **kwargs)
 
+def unpack_int4(b: bytes):
+    return divmod(unpack("B", b)[0], 0x10)
+
+def ensure_range(data: BinaryIO, varname: str, value: int, min_value: int, max_value: int):
+    if min_value <= value <= max_value: return
+    raise JPEGDecodeError(f"Expecting {varname} in [{min_value}, {max_value}] but was {value}", data, data.tell())
+
+def ensure_eos(data: BinaryIO):
+    b = data.read(1)
+    if not b: return
+    raise JPEGDecodeError(f"Expecting end of segment but 0x{b.hex()} was found", data, data.tell())
+
 def parse_qt(segment: bytes):
     # B.2.4.1 Quantization table-specification syntax
     debug('DQT', len(segment))
@@ -46,7 +58,7 @@ def parse_qt(segment: bytes):
     while True:
         PqTq = data.read(1)
         if not PqTq: break
-        Pq, Tq = divmod(unpack("B", PqTq)[0], 0x10)
+        Pq, Tq = unpack_int4(PqTq)
         debug('Pq, Tq:', Pq, Tq)
         if Pq == 0:
             Q = unpack("B" * 64, data.read(64))
@@ -55,25 +67,32 @@ def parse_qt(segment: bytes):
             Q = unpack(">" + "H" * 64, data.read(128))
         else:
             raise JPEGDecodeError(f"Unknown Pq {Pq}", data, data.tell())
-        ret.append({'Tq': Tq, 'Q': Q})
+        ensure_range(data, "Tq", Tq, 0, 3)
+        ret.append({'Pq': Pq, 'Tq': Tq, 'Q': Q})
     debug(ret)
     debug()
+    ensure_eos(data)
     return ret
 
 def parse_ht(segment: bytes):
     # B.2.4.2 Huffman table-specification syntax
     debug('DHT', len(segment))
     data = BytesIO(segment)
-    Tc, Th = divmod(unpack("B", data.read(1))[0], 0x10)
-    debug('Tc, Th:', Tc, Th)
-    if Tc not in [0, 1]:
-        raise JPEGDecodeError(f"Expecting Tc in [0, 1] but was {Tc}", data, data.tell())
-    L = unpack("B" * 16, data.read(16))
-    debug('L:', L)
-    V = [unpack("B" * L[i], data.read(L[i])) for i in range(16)]
-    ret = {'Tc': Tc, 'Th': Th, 'L': L, 'V': V}
+    ret = []
+    while True:
+        TcTh = data.read(1)
+        if not TcTh: break
+        Tc, Th = unpack_int4(TcTh)
+        debug('Tc, Th:', Tc, Th)
+        ensure_range(data, "Tc", Tc, 0, 1)
+        ensure_range(data, "Th", Th, 0, 1)
+        L = unpack("B" * 16, data.read(16))
+        debug('L:', L)
+        V = [unpack("B" * L[i], data.read(L[i])) for i in range(16)]
+        ret.append({'Tc': Tc, 'Th': Th, 'V': V})
     debug(ret)
     debug()
+    ensure_eos(data)
     return ret
 
 def parse_sof(segment: bytes):
@@ -83,19 +102,54 @@ def parse_sof(segment: bytes):
     P, Y, X, Nf = unpack(">BHHB", data.read(6))
     debug("P, Y, X, Nf:", P, Y, X, Nf)
     CHVTq = []
-    for i in range(Nf):
+    for _ in range(Nf):
         C, HV, Tq = unpack("BBB", data.read(3))
         H, V = divmod(HV, 0x10)
-        CHVTq.append((C, H, V, Tq))
+        ensure_range(data, "H", H, 1, 4)
+        ensure_range(data, "V", V, 1, 4)
+        ensure_range(data, "Tq", Tq, 0, 3)
+        CHVTq.append({"C": C, "H": H, "V": V, "Tq": Tq})
     ret = {
         'P': P,
         'Y': Y,
         'X': X,
-        'Nf': Nf,
         'CHVTq': CHVTq,
     }
     debug(ret)
     debug()
+    ensure_eos(data)
+    return ret
+
+def parse_sos(segment: bytes):
+    # B.2.3 Scan header syntax
+    debug('SOS', len(segment))
+    data = BytesIO(segment)
+    Ns = unpack("B", data.read(1))[0]
+    debug("Ns:", Ns)
+    ensure_range(data, "Ns", Ns, 1, 4)
+    CsTdTa = []
+    for _ in range(Ns):
+        Cs, TdTa = unpack("BB", data.read(2))
+        Td, Ta = divmod(TdTa, 0x10)
+        CsTdTa.append({'Cs': Cs, 'Td': Td, 'Ta': Ta})
+        ensure_range(data, 'Td', Td, 0, 1)
+        ensure_range(data, 'Ta', Ta, 0, 1)
+    Ss, Se = unpack("BB", data.read(2))
+    ensure_range(data, "Ss", Ss, 0, 0)
+    ensure_range(data, "Se", Se, 63, 63)
+    Ah, Al = unpack_int4(data.read(1))
+    ensure_range(data, "Ah", Ah, 0, 0)
+    ensure_range(data, "Al", Al, 0, 0)
+    ret = {
+        'CsTdTa': CsTdTa,
+        'Ss': Ss,
+        'Se': Se,
+        'Ah': Ah,
+        'Al': Al,
+    }
+    debug(ret)
+    debug()
+    ensure_eos(data)
     return ret
 
 def decode(data: BinaryIO):
@@ -108,6 +162,9 @@ def decode(data: BinaryIO):
             raise JPEGDecodeError(f"Expecting value 0x{p.hex()} but was 0x{q.hex()}", data, data.tell())
 
     __expect_bytes(MARKERS['SOI'])
+    glob_qt = {}
+    dc_ht = {}
+    ac_ht = {}
     while True:
         marker = data.read(2)
         if marker not in MARKERS_MAP:
@@ -124,13 +181,28 @@ def decode(data: BinaryIO):
             continue
 
         if marker == 'DQT':
-            qts = parse_qt(segment)
+            for qt in parse_qt(segment):
+                glob_qt[qt["Tq"]] = qt["Q"]
+            del qt
         elif marker == 'SOF0':
             sof = parse_sof(segment)
+            csp = {}
+            for x in sof["CHVTq"]:
+                csp[x["C"]] = x
         elif marker == 'DHT':
-            ht = parse_ht(segment)
-        if marker == 'SOS':
-            break
+            for ht in parse_ht(segment):
+                if ht["Tc"] == 0:
+                    dc_ht[ht["Th"]] = ht["V"]
+                else:
+                    ac_ht[ht["Th"]] = ht["V"]
+            del ht
+        elif marker == 'SOS':
+            sos = parse_sos(segment)
+            debug('QT:', glob_qt)
+            debug('AC:', dc_ht)
+            debug('HT:', ac_ht)
+            debug('Components:', csp)
+            debug(len(data.read()))
     return
     data = bytearray(data[idx:]) # entropy-coded segment
     idx = i = 0
