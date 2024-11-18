@@ -46,13 +46,13 @@ def parse_qt(segment: bytes):
     while True:
         PqTq = data.read(1)
         if not PqTq: break
-        Pq, Tq = divmod(unpack("B", PqTq)[0], 16)
-        debug('Pq Tq:', Pq, Tq)
+        Pq, Tq = divmod(unpack("B", PqTq)[0], 0x10)
+        debug('Pq, Tq:', Pq, Tq)
         if Pq == 0:
             Q = unpack("B" * 64, data.read(64))
         elif Pq == 1:
             raise JPEGDecodeError(f"Expecting Pq = 0 for baseline decoding but Pq = 1 was found", data, data.tell())
-            Q = unpack(">H" * 64, data.read(128))
+            Q = unpack(">" + "H" * 64, data.read(128))
         else:
             raise JPEGDecodeError(f"Unknown Pq {Pq}", data, data.tell())
         ret.append({'Tq': Tq, 'Q': Q})
@@ -64,16 +64,39 @@ def parse_ht(segment: bytes):
     # B.2.4.2 Huffman table-specification syntax
     debug('DHT', len(segment))
     data = BytesIO(segment)
-    Tc, Th = divmod(unpack("B", data.read(1))[0], 16)
-    debug('Tc Th:', Tc, Th)
+    Tc, Th = divmod(unpack("B", data.read(1))[0], 0x10)
+    debug('Tc, Th:', Tc, Th)
     if Tc not in [0, 1]:
         raise JPEGDecodeError(f"Expecting Tc in [0, 1] but was {Tc}", data, data.tell())
     L = unpack("B" * 16, data.read(16))
     debug('L:', L)
     V = [unpack("B" * L[i], data.read(L[i])) for i in range(16)]
-    debug('V:', V)
+    ret = {'Tc': Tc, 'Th': Th, 'L': L, 'V': V}
+    debug(ret)
     debug()
-    return {'Tc': Tc, 'Th': Th, 'V': V}
+    return ret
+
+def parse_sof(segment: bytes):
+    # B.2.2 Frame header syntax
+    debug('SOF', len(segment))
+    data = BytesIO(segment)
+    P, Y, X, Nf = unpack(">BHHB", data.read(6))
+    debug("P, Y, X, Nf:", P, Y, X, Nf)
+    CHVTq = []
+    for i in range(Nf):
+        C, HV, Tq = unpack("BBB", data.read(3))
+        H, V = divmod(HV, 0x10)
+        CHVTq.append((C, H, V, Tq))
+    ret = {
+        'P': P,
+        'Y': Y,
+        'X': X,
+        'Nf': Nf,
+        'CHVTq': CHVTq,
+    }
+    debug(ret)
+    debug()
+    return ret
 
 def decode(data: BinaryIO):
     def __read_int16():
@@ -103,7 +126,7 @@ def decode(data: BinaryIO):
         if marker == 'DQT':
             qts = parse_qt(segment)
         elif marker == 'SOF0':
-            pass
+            sof = parse_sof(segment)
         elif marker == 'DHT':
             ht = parse_ht(segment)
         if marker == 'SOS':
