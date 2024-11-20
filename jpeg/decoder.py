@@ -1,6 +1,8 @@
 import numpy as np
 
 import math
+
+from collections import namedtuple
 from io import BytesIO
 from struct import unpack
 from typing import BinaryIO
@@ -119,43 +121,36 @@ class JPEG:
         debug('Y X:', self.Y, self.X)
         debug('scan:', self.scan)
         debug(len(segment))
-        return
 
-        components = sos['CsTdTa']
-        for x in components:
-            component = csp[x.pop('Cs')]
-            dc = dcs[x.pop('Td')]
-            ac = acs[x.pop('Ta')]
-            qt = qts[component['Tq']]
-            x['H'] = component['H']
-            x['V'] = component['V']
-            x['qt'] = qt
-            x['dc'] = dc
-            x['ac'] = ac
-
-        debug(len(segment))
-        p = iter(segment)
-
-        Vmax = max(x['V'] for x in components)
-        Hmax = max(x['H'] for x in components)
+        # A.1.1 Dimensions and sampling factors
+        Vmax = max(x['V'] for x in self.csp.values())
+        Hmax = max(x['H'] for x in self.csp.values())
+        # A.2.4 Completion of partial MCU
         MCU_Y, MCU_X = 8 * Vmax, 8 * Hmax
-        _Y, _X = sof['Y'], sof['X']
-        Y = math.ceil(_Y / MCU_Y) * MCU_Y
-        X = math.ceil(_X / MCU_X) * MCU_X
+        Y = math.ceil(self.Y / MCU_Y) * MCU_Y
+        X = math.ceil(self.X / MCU_X) * MCU_X
+        #
+        ScanParam = namedtuple('ScanParam', ['Cs', 'H', 'V', 'qt', 'dc', 'ac'])
+        scan: list[ScanParam] = []
+        for a in self.scan:
+            b = self.csp[a['Cs']]
+            scan.append(ScanParam(
+                a['Cs'], b['H'], b['V'],
+                self.qts[b['Tq']], self.dcs[a['Td']], self.acs[a['Ta']]
+            ))
 
         img = np.zeros((3, Y, X), dtype=int)
-        def parse_block(component):
-            qt, dc, ac = component['qt'], component['dc'], component['ac']
+        def parse_block(param: ScanParam):
             return np.zeros((8, 8), dtype=int)
 
         def parse_mcu():
             mcu = np.zeros((3, MCU_Y, MCU_X), dtype=int)
-            for t, c in enumerate(components):
-                buf = np.zeros((8 * c['V'], 8 * c['H']), dtype=int)
-                for i in range(c['V']):
-                    for j in range(c['H']):
-                        buf[8 * i: 8 * i + 8, 8 * j: 8 * j + 8] = parse_block(c)
-                mcu[t] = upsample(buf, Vmax // c['V'], Hmax // c['H'])
+            for param in scan:
+                buf = np.zeros((8 * param.V, 8 * param.H), dtype=int)
+                for i in range(param.V):
+                    for j in range(param.H):
+                        buf[8 * i: 8 * i + 8, 8 * j: 8 * j + 8] = parse_block(param)
+                mcu[param.Cs - 1] = upsample(buf, Vmax // param.V, Hmax // param.H)
             return mcu
 
         for i in range(0, Y, MCU_Y):
