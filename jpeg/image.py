@@ -16,5 +16,5 @@ def ycbcr2bgr(img: np.ndarray, shift):
     Y, Cb, Cr = img[0], img[1] - shift, img[2] - shift
     R = Y + 1.402 * Cr
     G = Y - 0.34414 * Cb - 0.71414 * Cr
-    B = Y + 0.1772 * Cb
+    B = Y + 1.772 * Cb
     return np.stack((B, G, R), axis=0)

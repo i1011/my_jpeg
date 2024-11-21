@@ -31,3 +31,6 @@ files = ["monalisa", "gig-sn01", "gig-sn08", "teatime"]
 for file in files:
     img = JPEG().decode(open(f"Image/{file}.jpg", "rb"))
     cv.imwrite(f"Image/{file}.out.bmp", img)
+
+    img2 = cv.imread(f"Image/{file}.jpg", cv.IMREAD_COLOR)
+    cv.imwrite(f"Image/{file}-diff.png", cv.absdiff(img, img2))
