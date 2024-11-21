@@ -1,5 +1,6 @@
 from jpeg import *
 from jpeg.image import np, upsample
+from jpeg.misc import DCT
 
 def test_upsample():
     a = np.array([
@@ -14,7 +15,16 @@ def test_upsample():
     ])
     assert np.array_equal(upsample(a, 2, 3), b)
 
+def test_dct_idct_identity():
+    dct = DCT()
+    a = np.random.rand(8, 8)
+    b = dct.idct(dct.dct(a))
+    assert np.max(np.abs(a - b)) < 1e-9
+    b = dct.dct(dct.idct(a))
+    assert np.max(np.abs(a - b)) < 1e-9
+
 test_upsample()
+test_dct_idct_identity()
 files = ["monalisa", "gig-sn01", "gig-sn08", "teatime"]
 for file in files:
     JPEG().decode(open(f"Image/{file}.jpg", "rb"))

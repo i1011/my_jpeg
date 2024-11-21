@@ -82,3 +82,24 @@ def ziglag(a: np.ndarray):
         35, 36, 48, 49, 57, 58, 62, 63,
     ])
     return a[pos].reshape(8, 8)
+
+class DCT:
+    def __init__(self):
+        n = 8
+        A = np.zeros((n, n))
+        i, j = np.meshgrid(
+            np.arange(n), np.arange(n), indexing='ij'
+        )
+        A = np.sqrt(2 / n) * np.cos(np.pi / n * i * (j + 0.5))
+        A[0] /= np.sqrt(2)
+        self.P = A
+        self.Q = A.T
+    
+    def dct(self, a: np.ndarray):
+        assert a.shape == (8, 8)
+        return self.P @ a @ self.Q
+    
+    def idct(self, a: np.ndarray):
+        assert a.shape == (8, 8)
+        return self.Q @ a @ self.P
+        

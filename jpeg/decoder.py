@@ -66,6 +66,7 @@ class JPEG:
         self.dcs = {}
         self.acs = {}
         self.csp = {}
+        self.P = 8
         self.Y = self.X = -1
         self.scan = []
 
@@ -78,13 +79,14 @@ class JPEG:
             Pq, Tq = unpack_int4(PqTq)
             if Pq != 0: raise JPEGDecodeError(f"Unknown Pq {Pq}", stream, stream.tell())
             Q = unpack('B' * 64, stream.read(64))
-            self.qts[Tq] = Q
+            self.qts[Tq] = np.array(Q)
         ensure_eos(stream)
 
     def sof0(self, segment: bytes):
         # B.2.2 Frame header syntax
         stream = BytesIO(segment)
         P, Y, X, Nf = unpack('>BHHB', stream.read(6))
+        if P != 8: raise JPEGDecodeError(f"Expecting P = 8 for baseline decoding but was {P}", stream, stream.tell())
         if Nf != 3: raise JPEGDecodeError(f"Expecting YCbCr mode but Nf = {Nf}", stream, stream.tell())
         for _ in range(Nf):
             C, HV, Tq = unpack('BBB', stream.read(3))
@@ -92,6 +94,7 @@ class JPEG:
             ensure_set(stream, 'H', H, [1, 2, 4])
             ensure_set(stream, 'V', V, [1, 2, 4])
             self.csp[C] = {'H': H, 'V': V, 'Tq': Tq}
+        self.P = P
         self.Y, self.X = Y, X
         ensure_eos(stream)
 
@@ -148,7 +151,7 @@ class JPEG:
         stream = BitStream(segment)
         img = np.zeros((3, Y, X), dtype=int)
 
-        t = 0
+        dct = DCT()
         def decode_block(param: ScanParam):
             c = []
             # Differential DC encoding
@@ -167,12 +170,16 @@ class JPEG:
                 c.append(stream.read_signed(L))
             if len(c) != 64:
                 raise JPEGDecodeError(f"Expecting 64 elements in block but was {len(c)}", stream, stream.tell())
-            a = ziglag(np.array(c))
-            debug(a)
-            nonlocal t
-            t += 1
-            if t == 5: exit(0)
-            return np.zeros((8, 8), dtype=int)
+
+            # Dequantization
+            a = ziglag(np.array(c) * param.qt)
+
+            # IDCT
+            a = np.round(dct.idct(a)).astype(int)
+
+            # A.3.1 Level shift
+            a += 2 ** (self.P - 1)
+            return a
 
         def decode_mcu():
             mcu = np.zeros((3, MCU_Y, MCU_X), dtype=int)
