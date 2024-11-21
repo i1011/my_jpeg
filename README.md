@@ -17,6 +17,9 @@ Currently, the supported markers are:
 </details>
 
 ## Environment
+
+- Python: 3.12.3
+
 It is recommended to use [virtualenv](https://docs.python.org/3/library/venv.html) to set up the environment.
 
 ``` bash
