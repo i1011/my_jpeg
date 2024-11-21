@@ -9,7 +9,7 @@ from typing import BinaryIO
 
 from .debug import debug
 from .misc import *
-from .image import upsample
+from .image import upsample, ycbcr2bgr
 
 class JPEGDecodeError(ValueError):
     def __init__(self, msg, data, pos):
@@ -194,6 +194,7 @@ class JPEG:
         for i in range(0, Y, MCU_Y):
             for j in range(0, X, MCU_X):
                 img[:, i: i + MCU_Y, j: j + MCU_X] = decode_mcu()
+        return img
 
     def decode(self, stream: BinaryIO):
         def __read_int16():
@@ -204,6 +205,7 @@ class JPEG:
             if q != p:
                 raise JPEGDecodeError(f"Expecting value 0x{p.hex()} but was 0x{q.hex()}", stream, stream.tell())
 
+        img = None
         __expect_bytes(MARKERS['SOI'])
         while True:
             marker = stream.read(2)
@@ -236,5 +238,13 @@ class JPEG:
                         stream.seek(-2, 1)
                         break
                     segment.append(val)
-                self.decode_ecs(b''.join(segment))
+                img = self.decode_ecs(b''.join(segment))
         ensure_eos(stream)
+        if img is None: return None
+        img = img[:, :self.Y, :self.X]
+        img = ycbcr2bgr(img, 2 ** (self.P - 1))
+        img = np.clip(np.round(img), 0, 2 ** self.P - 1)
+        assert self.P == 8
+        img = img.astype(np.uint8)
+        img = img.transpose(1, 2, 0)
+        return img

@@ -1,3 +1,5 @@
+import cv2 as cv
+
 from jpeg import *
 from jpeg.image import np, upsample
 from jpeg.misc import DCT
@@ -27,5 +29,5 @@ test_upsample()
 test_dct_idct_identity()
 files = ["monalisa", "gig-sn01", "gig-sn08", "teatime"]
 for file in files:
-    JPEG().decode(open(f"Image/{file}.jpg", "rb"))
-    break
+    img = JPEG().decode(open(f"Image/{file}.jpg", "rb"))
+    cv.imwrite(f"Image/{file}.out.bmp", img)
