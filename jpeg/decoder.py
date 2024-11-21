@@ -148,21 +148,30 @@ class JPEG:
         stream = BitStream(segment)
         img = np.zeros((3, Y, X), dtype=int)
 
+        t = 0
         def decode_block(param: ScanParam):
-            a = np.zeros((8, 8), dtype=float)
-
+            c = []
             # Differential DC encoding
-            T = scan[0].dc.next(stream)
-            diff = stream.read_n(T)
-            if diff >> (T - 1) == 0:
-                diff -= 2 ** T - 1
+            T = param.dc.next(stream)
+            diff = stream.read_signed(T)
             param.dc_acc += diff
-            a[0, 0] = param.dc_acc
+            c.append(param.dc_acc)
 
             # Run-length encoding
-
+            while len(c) < 64:
+                R, L = divmod(param.ac.next(stream), 16)
+                if R == L == 0: # EOB
+                    c += [0] * (64 - len(c))
+                    break
+                c += [0] * R
+                c.append(stream.read_signed(L))
+            if len(c) != 64:
+                raise JPEGDecodeError(f"Expecting 64 elements in block but was {len(c)}", stream, stream.tell())
+            a = ziglag(np.array(c))
             debug(a)
-            exit(0)
+            nonlocal t
+            t += 1
+            if t == 5: exit(0)
             return np.zeros((8, 8), dtype=int)
 
         def decode_mcu():
