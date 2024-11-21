@@ -34,5 +34,5 @@ make
 ``` bash
 # activates the environment
 source .venv/bin/activate
-python -m jpeg monalisa.jpg
+python3 -m jpeg monalisa.jpg
 ```
